@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Creacion de Roles - Security
+
+Parameters:
+  Environment:
+    Type: String
+  Project:
+    Type: String
+
+
+Resources:
+  DeployinfraS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join [ '-', [ !Ref Project, !Ref Environment, 'deployinfra' ] ]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+  #################################################
+  #                                               #
+  # Roles                                         #
+  #                                               #
+  #################################################
+
+  LambdaProducerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                 - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "LambdaProducerPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectAcl"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "sqs:SendMessage"
+                  - "sqs:GetQueueAttributes"
+                  - "sqs:ChangeMessageVisibility"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:GetRecords"
+                  - "dynamodb:Query"
+                Resource: "*"
+      RoleName: !Join ["-", [!Ref Project, !Ref Environment, 'LambdaProducerRole']]
+
+  LambdaConsumerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "LambdaConsumerPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:*"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "sqs:ReceiveMessage"
+                  - "sqs:DeleteMessage"
+                  - "sqs:GetQueueAttributes"
+                  - "sqs:ChangeMessageVisibility"
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - "lambda:InvokeFunction"
+                  - "lambda:InvokeAsync"
+                Resource: "*"
+
+      RoleName: !Join ["-", [!Ref Project, !Ref Environment, 'LambdaConsumerRole']]
+
+  LambdaMoveFileRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "LambdaMoveFilePolicy"
+          PolicyDocument:
+            # This is the current version of the policy language, and you should always include a Version element
+            # and set it to 2012-10-17. Otherwise, you cannot use features such as policy variables that were
+            # introduced with this version.
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:*"
+                Resource: "*"
+      RoleName: !Join ["-", [!Ref Project, !Ref Environment, 'LambdaMoveFileRole']]
+
+#################################################
+#                                               #
+# Outputs                                       #
+#                                               #
+#################################################
+
+Outputs:
+  LambdaProducerRole:
+    Description: Rol del lambda producer
+    Value: !GetAtt LambdaProducerRole.Arn
+    Export:
+      Name: !Join ["-", [!Ref Project, !Ref Environment, "LambdaProducerRole"]]
+
+  LambdaConsumerRole:
+    Description: Rol del lambda consumer
+    Value: !GetAtt LambdaConsumerRole.Arn
+    Export:
+      Name: !Join ["-", [!Ref Project, !Ref Environment, "LambdaConsumerRole"]]
+
+  LambdaMoveFileRole:
+    Description: Rol del lambda mapped
+    Value: !GetAtt LambdaMoveFileRole.Arn
+    Export:
+      Name: !Join ["-", [!Ref Project, !Ref Environment, "LambdaMoveFileRole"]]

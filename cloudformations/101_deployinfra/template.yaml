@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Deploy de las Lambdas, Eventos que disparan lambdas, Buckets, parametros.
+Parameters:
+  UUID:
+    Type: String
+  Project:
+    Type: String
+  Environment:
+    Type: String
+    Description: Environment
+    MinLength: '1'
+    MaxLength: '41'
+    ConstraintDescription: must contain only alphanumeric characters and _.
+  LogLevel:
+    Type: String
+    Description: log level for the debugging of the lambdas
+    MinLength: '1'
+    MaxLength: '41'
+    AllowedValues:
+      - error
+      - warn
+      - info
+      - debug
+    ConstraintDescription: "only allowed values: error, warn, info, debug"
+
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Runtime: python3.7
+    AutoPublishAlias: !Ref Environment
+    MemorySize: 128
+    Timeout: 120
+    Handler: app.run
+    Tags:
+      environment: !Ref Environment
+      project: !Join ["-", [!Ref Environment, !Ref Project]]
+    Environment:
+      Variables:
+        ENV: !Ref Environment
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+
+  #################################################
+  #                                               #
+  # FUNCTIONS                                      #
+  #                                               #
+  #################################################
+
+  LambdaProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../functions/001_producer_lambda
+      FunctionName: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaProducer']]
+      AutoPublishAlias: ActiveVersion
+      Timeout: 900
+      Role:
+        Fn::ImportValue: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaProducerRole']]
+      Environment:
+        Variables:
+          prod_queue_url: !Ref ProducerQueue
+      Events:
+        SqsProducerEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref LakeRawS3DynamoParameterBucket
+            Events: s3:ObjectCreated:*
+
+  LambdaCsvFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../functions/003_csvfile_lambda
+      FunctionName: !Join ['-', [!Ref Project, !Ref Environment, 'CsvFile']]
+      AutoPublishAlias: ActiveVersion
+      Timeout: 900
+      Role:
+        Fn::ImportValue: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaMoveFileRole']]
+      Environment:
+        Variables:
+          destiny_bucket: !Ref LakeRawAggS3DynamoParameterBucket
+
+  LambdaJsonFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../functions/004_jsonfile_lambda
+      FunctionName: !Join ['-', [!Ref Project, !Ref Environment, 'JsonFile']]
+      AutoPublishAlias: ActiveVersion
+      Timeout: 900
+      Role:
+        Fn::ImportValue: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaMoveFileRole']]
+      Environment:
+        Variables:
+          destiny_bucket: !Ref LakeRawAggS3DynamoParameterBucket
+
+  LambdaConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../functions/002_consumer_lambda
+      FunctionName: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaConsumer']]
+      AutoPublishAlias: ActiveVersion
+      Timeout: 900
+      Role:
+        Fn::ImportValue: !Join ['-', [!Ref Project, !Ref Environment, 'LambdaConsumerRole']]
+
+  #################################################
+  #                                               #
+  # EVENT SOURCE MAPPING                          #
+  #                                               #
+  #################################################
+  SqsConsumerFunctionEventSourceMapping:
+    Type:
+      AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt ProducerQueue.Arn
+      FunctionName: !GetAtt LambdaConsumerFunction.Arn
+  #################################################
+  #                                               #
+  # BUCKET                                        #
+  #                                               #
+  #################################################
+  #acciona-s3dynamoparameter-rocio-initialbucket
+  LakeRawS3DynamoParameterBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:  !Join ['-', [!Ref Project, !Ref Environment, 'initialbucket']]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+
+  LakeRawAggS3DynamoParameterBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join [ '-', [ !Ref Project, !Ref Environment, 'destinationbucket' ] ]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+
+  #################################################
+  #                                               #
+  # QUEUE                                        #
+  #                                               #
+  #################################################
+
+  ProducerQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      FifoQueue: true
+      QueueName: !Join [ '-', [ !Ref Project, !Ref Environment, 'Queue.fifo' ]]
